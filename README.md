@@ -1,4 +1,4 @@
-# Bayesian Imputation for Multivariate Left-Censored Data
+# Bayesian Imputation for Multivariate Left-Censored Data Suffering from Limit of Detection
 
 R implementation accompanying the paper:
 
