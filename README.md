@@ -9,34 +9,51 @@ R implementation accompanying the paper:
 ## Structure
 
 ```
-utils.R               Shared helpers: samplers, warm-started TMV kernels
+utils.R               Shared helpers: numerical stabilizers, samplers,
+                      and warm started TMV kernels
 gibbs_mvn.R           Parametric (MVN) imputation model
 gibbs_dpml.R          Nonparametric (DPML) imputation model
+gibbs_mfm.R           Dynamic mixture of finite mixtures (MFM) and 
+                      optional fixed-K finite mixture imputation models
 prior_elicitation.R   Standard prior specification (Section 4.2)
 diagnostics.R         LOD checks, posterior summaries,
-                      scatterplot matrix with uncertainty encoding
+                      and scatterplot matrix with uncertainty encoding
+dgp.R                 Data-generating process for the toy example scenarios
 Toy_example.R         Minimal working example
 ```
 
 ## What changed
 
-- The codebase has been refactored and organised so that the MVN and
-  DPML imputation models are kept in separate scripts, while shared
-  sampling helpers live in `utils.R`.
-- Diagnostics and visualisation utilities are collected in
-  `diagnostics.R`, including the scatterplot matrix with
-  pointwise uncertainty encoding.
-- The example workflow in `Toy_example.R` has been refreshed and now uses
-  a correlated AR(1) covariance structure, so the scatterplots are more
-  informative than a purely independent toy dataset.
-- Tuning controls for the truncated sampling step are exposed directly in
-  the main Gibbs samplers.
+- Numerical stabilizers have been added in `utils.R` to improve robustness. 
+  These include matrix symmetrisation, positive-definiteness checks, 
+  and small diagonal jitter corrections before matrix inversions and
+  Cholesky decompositions.
+- The imputation kernels have been updated to handle fully censored rows 
+  by sampling from the corresponding truncated multivariate marginal distribution.
+- The MVN and DPML Gibbs samplers have been adapted to use the new numerical
+  stabilizers and the updated imputation kernels defined in `utils.R`.
+- The MFM sampler has been added in `gibbs_mfm.R` as a dynamic mixture of 
+  finite mixtures, with posterior updating of the number of mixture components. 
+  An optional fixed-K finite mixture mode has also been added. When this option 
+  is used, the number of occupied mixture components is specified by the 
+  practitioner and the sampler should be interpreted as a finite mixture sampler 
+  rather than as a dynamic MFM.
+- The prior specification function in `prior_elicitation.R` has been updated to 
+  use a common notation across models and to include the prior quantities 
+  required by the MFM sampler.
+- The data-generating process has been moved to `dgp.R`, which contains the
+  functions used to simulate latent data under different scenarios.
+- The example workflow in `Toy_example.R` now includes an additional evaluation 
+  section comparing the models in terms of imputation accuracy, 
+  posterior uncertainty, and runtime. This section relies on the true latent 
+  values and is therefore specific to the toy example setting.
 
 ## Quick start
 
 ```r
 source("utils.R")
 source("gibbs_mvn.R")
+source("gibbs_mfm.R")
 source("gibbs_dpml.R")
 source("prior_elicitation.R")
 source("diagnostics.R")
@@ -44,7 +61,7 @@ source("diagnostics.R")
 priors <- standard_prior_elicitation("MVN", Z = Z_LODs)
 
 fit <- gibbs_mvn(
-  Z = Z_LODs, mu_0 = priors$mu, Omega = priors$Omega,
+  Z = Z_LODs, mu_0 = priors$m0, Omega = priors$Omega,
   v0 = priors$v0, S_0 = priors$S0, cens = LODs, R = 1000
 )
 

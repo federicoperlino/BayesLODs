@@ -1,4 +1,6 @@
-######### MVN Imputation Model ##############################################
+# =========================================================================
+# MVN Imputation Model 
+# =========================================================================
 #
 # Gibbs sampler for the parametric (multivariate normal) imputation model
 # described in Section 3.1 of the paper.
@@ -12,7 +14,8 @@
 # The warm-start ensures the inner Gibbs kernel is a valid invariant
 # transition for the truncated full conditional, so the overall chain
 # targets the correct posterior pi(Y, mu, Sigma | Z).
-# See R/utils.R for the imputation kernel implementation.
+# See R/utils.R for the imputation kernel implementation and R/gibbs_dpml.R and 
+# R/gibbs_mfm for the analogous samplers.
 
 # -------------------------------------------------------------------------
 # Main function
@@ -31,6 +34,9 @@
 #' @param ag      Algorithm for truncated sampling ("gibbs", "rejection", ...)
 #' @param burn.in.samples  Burn-in sweeps for the inner TMV sampler (default 0)
 #' @param thinning         Thinning for the inner TMV sampler (default 1)
+#' @param jitter Initial diagonal jitter for SPD operations
+#' @param max_tries Maximum number of jitter expansions
+#' @param rel Logical; if TRUE, scale jitter relative to matrix magnitude
 #' @return List with components:
 #'   \item{Y}{Array n x q x R of imputed latent data}
 #'   \item{mu}{Final mean vector}
@@ -38,7 +44,10 @@
 gibbs_mvn <- function(Z, mu_0, Omega, v0, S_0, cens, R,
                       ag = "gibbs",
                       burn.in.samples = 0,
-                      thinning = 1) {
+                      thinning = 1, 
+                      jitter = 1e-10,
+                      max_tries = 6,
+                      rel = TRUE) {
   q <- ncol(Z)
   n <- nrow(Z)
 
@@ -70,23 +79,34 @@ gibbs_mvn <- function(Z, mu_0, Omega, v0, S_0, cens, R,
       cens_row = if (cens_is_matrix) cens[i, ] else cens,
       ag       = ag,
       burn.in.samples = burn.in.samples,
-      thinning = thinning
+      thinning = thinning, 
+      jitter = jitter, 
+      max_tries = max_tries, 
+      rel = rel
     )
   }))
 
   # --- Gibbs iterations ---------------------------------------------------
   for (s in 2:R) {
     # 1. Update mu
+    Omega_inv <- inv_spd(Omega, jitter = jitter, max_tries = max_tries, rel = rel)
+    Sigma_inv <- inv_spd(Sigma, jitter = jitter, max_tries = max_tries, rel = rel)
     ybar <- colMeans(Y[, , s - 1])
-    A_n  <- solve(Omega) + n * solve(Sigma)
-    b_n  <- solve(Omega) %*% mu_0 + n * solve(Sigma) %*% ybar
-    mu   <- as.numeric(rmvnorm(1, solve(A_n) %*% b_n, solve(A_n)))
+    A_n  <- Omega_inv + n * Sigma_inv
+    b_n  <- Omega_inv %*% mu_0 + n * Sigma_inv %*% ybar
+    V_n <- inv_spd(A_n, jitter = jitter, max_tries = max_tries, rel = rel)
+    m_n <- as.numeric(V_n %*% b_n)
+    mu   <- as.numeric(rmvnorm(1, m_n, V_n))
 
     # 2. Update Sigma
     Ym   <- sweep(Y[, , s - 1], 2, mu, "-")
     S_mu <- t(Ym) %*% Ym
-    S_n  <- solve(S_0 + S_mu)
-    Sigma <- solve(rwish(1, v0 + n, S_n)[, , 1])
+    S_post <- symmetrize(S_0 + S_mu)
+    S_n  <- inv_spd(S_post, jitter = jitter, max_tries = max_tries, rel = rel)
+    Sigma <- rinvwish1(v0 = v0 + n, S0 = S_n,
+                       jitter = jitter,
+                       max_tries = max_tries,
+                       rel = rel)
 
     # 3. Imputation step: warm-start from Y[, , s-1]
     Y[, , s] <- t(sapply(1:n, function(i) {
@@ -98,7 +118,10 @@ gibbs_mvn <- function(Z, mu_0, Omega, v0, S_0, cens, R,
         cens_row = if (cens_is_matrix) cens[i, ] else cens,
         ag       = ag,
         burn.in.samples = burn.in.samples,
-        thinning = thinning
+        thinning = thinning, 
+        jitter = jitter, 
+        max_tries = max_tries, 
+        rel = rel
       )
     }))
 
